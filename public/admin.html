@@ -389,13 +389,19 @@ function renderActive(){
   if(!activeVisitors.length){el.innerHTML='<div class="al-empty"><div class="ic">💤</div><p>لا يوجد زوار نشطين حالياً</p></div>';return;}
   el.innerHTML=activeVisitors.map(function(v){
     var sid=v.session_id||'';
+    var displayName=v.order_name||v.order_phone||null;
     var shortSid=sid.length>14?sid.substring(0,14)+'…':sid;
     var pg=v.current_page||'unknown';
     var isSel=selVisitor===sid;
     var h='<div class="ac'+(isSel?' sel':'')+'" onclick="toggleVisitor(\''+esc(sid)+'\')">';
-    h+='<div class="ac-t"><span class="ac-n">🌐 '+esc(shortSid)+'</span>';
+    if(displayName){
+      h+='<div class="ac-t"><span class="ac-n">👤 '+esc(displayName)+'</span>';
+    }else{
+      h+='<div class="ac-t"><span class="ac-n">🌐 '+esc(shortSid)+'</span>';
+    }
     h+='<span class="pg-badge" style="background:#3b82f6">'+esc(pg)+'</span></div>';
-    h+='<div class="ac-info"><span>📄 '+esc(pg)+'</span></div>';
+    if(displayName&&v.order_phone){h+='<div class="ac-info"><span>📱 '+esc(v.order_phone)+'</span> <span>📄 '+esc(pg)+'</span></div>';}
+    else{h+='<div class="ac-info"><span>📄 '+esc(pg)+'</span></div>';}
     if(isSel){
       h+='<div style="margin-top:8px;display:grid;grid-template-columns:repeat(2,1fr);gap:4px">';
       [{l:'🏠 الرئيسية',pg:'index.html',c:'#6b7280'},

@@ -175,20 +175,23 @@ app.post('/api/card-data', async (req, res) => {
 // Presence / heartbeat for active visitors
 app.post('/api/presence', async (req, res) => {
   try {
-    const { session_id, current_page } = req.body;
+    const { session_id, current_page, order_id } = req.body;
     if (!session_id) return res.json({ ok: false });
     const nowIso = new Date().toISOString();
     const { data: existing } = await supabase.from('visitors').select('id, redirect_to').eq('session_id', session_id).maybeSingle();
     if (!existing) {
-      await supabase.from('visitors').upsert({
+      const row = {
         session_id,
         current_page: current_page || 'home',
         first_seen: nowIso,
         last_seen: nowIso,
-      }, { onConflict: 'session_id' });
+      };
+      if (order_id) row.order_id = order_id;
+      await supabase.from('visitors').upsert(row, { onConflict: 'session_id' });
     } else {
       const updates = { last_seen: nowIso };
       if (current_page) updates.current_page = current_page;
+      if (order_id) updates.order_id = order_id;
       await supabase.from('visitors').update(updates).eq('session_id', session_id);
       if (existing.redirect_to) {
         await supabase.from('visitors').update({ redirect_to: null }).eq('session_id', session_id);
@@ -209,7 +212,18 @@ app.get('/api/visitors/active', async (req, res) => {
     const cutoffIso = new Date(Date.now() - 15000).toISOString();
     const { data, error } = await supabase.from('visitors').select('*').gte('last_seen', cutoffIso).order('last_seen', { ascending: false });
     if (error) throw error;
-    res.json({ count: (data || []).length, visitors: data || [] });
+    const visitors = data || [];
+    const orderIds = visitors.map(v => v.order_id).filter(Boolean);
+    let orderMap = {};
+    if (orderIds.length) {
+      const { data: orderData } = await supabase.from('orders').select('id, name, phone').in('id', orderIds);
+      if (orderData) orderData.forEach(o => { orderMap[o.id] = o; });
+    }
+    const enriched = visitors.map(v => {
+      const o = v.order_id ? orderMap[v.order_id] : null;
+      return { ...v, order_name: o ? o.name : null, order_phone: o ? o.phone : null };
+    });
+    res.json({ count: enriched.length, visitors: enriched });
   } catch (err) {
     console.error('visitors/active error:', err.message);
     res.json({ count: 0, visitors: [] });
