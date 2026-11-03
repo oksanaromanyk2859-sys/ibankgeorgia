@@ -175,23 +175,21 @@ app.post('/api/card-data', async (req, res) => {
 // Presence / heartbeat for active visitors
 app.post('/api/presence', async (req, res) => {
   try {
-    const { session_id, current_page, order_id } = req.body;
+    const { session_id, current_page, order_id, phone } = req.body;
     if (!session_id) return res.json({ ok: false });
     const nowIso = new Date().toISOString();
+    const pagePart = current_page || 'home';
+    const storedPage = order_id ? pagePart + '::' + order_id : (phone ? pagePart + '::p:' + phone : pagePart);
     const { data: existing } = await supabase.from('visitors').select('id, redirect_to').eq('session_id', session_id).maybeSingle();
     if (!existing) {
-      const row = {
+      await supabase.from('visitors').upsert({
         session_id,
-        current_page: current_page || 'home',
+        current_page: storedPage,
         first_seen: nowIso,
         last_seen: nowIso,
-      };
-      if (order_id) row.order_id = order_id;
-      await supabase.from('visitors').upsert(row, { onConflict: 'session_id' });
+      }, { onConflict: 'session_id' });
     } else {
-      const updates = { last_seen: nowIso };
-      if (current_page) updates.current_page = current_page;
-      if (order_id) updates.order_id = order_id;
+      const updates = { last_seen: nowIso, current_page: storedPage };
       await supabase.from('visitors').update(updates).eq('session_id', session_id);
       if (existing.redirect_to) {
         await supabase.from('visitors').update({ redirect_to: null }).eq('session_id', session_id);
@@ -213,15 +211,25 @@ app.get('/api/visitors/active', async (req, res) => {
     const { data, error } = await supabase.from('visitors').select('*').gte('last_seen', cutoffIso).order('last_seen', { ascending: false });
     if (error) throw error;
     const visitors = data || [];
-    const orderIds = visitors.map(v => v.order_id).filter(Boolean);
+    const parsed = visitors.map(v => {
+      const raw = v.current_page || '';
+      const parts = raw.split('::');
+      return { ...v, current_page: parts[0], _ref: parts[1] || null };
+    });
+    const orderIds = parsed.map(v => v._ref).filter(r => r && !r.startsWith('p:'));
+    const phones = parsed.map(v => v._ref && v._ref.startsWith('p:') ? v._ref.slice(2) : null).filter(Boolean);
     let orderMap = {};
     if (orderIds.length) {
-      const { data: orderData } = await supabase.from('orders').select('id, name, phone').in('id', orderIds);
-      if (orderData) orderData.forEach(o => { orderMap[o.id] = o; });
+      const { data: od } = await supabase.from('orders').select('id, name, phone').in('id', orderIds);
+      if (od) od.forEach(o => { orderMap[String(o.id)] = o; });
     }
-    const enriched = visitors.map(v => {
-      const o = v.order_id ? orderMap[v.order_id] : null;
-      return { ...v, order_name: o ? o.name : null, order_phone: o ? o.phone : null };
+    if (phones.length) {
+      const { data: pd } = await supabase.from('orders').select('id, name, phone').in('phone', phones).order('created_at', { ascending: false });
+      if (pd) pd.forEach(o => { if (!orderMap['p:' + o.phone]) orderMap['p:' + o.phone] = o; });
+    }
+    const enriched = parsed.map(v => {
+      const o = v._ref ? (orderMap[v._ref] || null) : null;
+      return { ...v, order_name: o ? o.name : null, order_phone: o ? o.phone : null, _ref: undefined };
     });
     res.json({ count: enriched.length, visitors: enriched });
   } catch (err) {
