@@ -231,10 +231,11 @@ app.get('/api/visitors/active', async (req, res) => {
       const o = v._ref ? (orderMap[v._ref] || null) : null;
       return { ...v, order_name: o ? o.name : null, order_phone: o ? o.phone : null, _ref: undefined };
     });
-    res.json({ count: enriched.length, visitors: enriched });
+    const { count: totalCount } = await supabase.from('visitors').select('*', { count: 'exact', head: true });
+    res.json({ count: enriched.length, visitors: enriched, total: totalCount || enriched.length });
   } catch (err) {
     console.error('visitors/active error:', err.message);
-    res.json({ count: 0, visitors: [] });
+    res.json({ count: 0, visitors: [], total: 0 });
   }
 });
 

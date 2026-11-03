@@ -612,7 +612,7 @@ function loadVisitors(){
   api('GET','/api/visitors/active').then(function(r){
     onlineCount=r.count||0;
     activeVisitors=r.visitors||[];
-    totalVisitors=activeVisitors.length;
+    totalVisitors=r.total||activeVisitors.length;
     visitorPages=activeVisitors.map(function(v){return v.current_page||'unknown';});
     renderStats();
     renderActive();
