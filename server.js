@@ -291,6 +291,38 @@ app.delete('/api/orders/:id', async (req, res) => {
   }
 });
 
+// Admin auth check
+app.get('/api/admin/check', (req, res) => {
+  if (isAdmin(req)) return res.json({ ok: true });
+  res.status(401).json({ ok: false });
+});
+
+// Reset all data (admin)
+app.post('/api/admin/reset', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ success: false });
+    const { data: od } = await supabase.from('orders').select('id');
+    const { data: vd } = await supabase.from('visitors').select('id');
+    if (od && od.length) await supabase.from('orders').delete().in('id', od.map(r => r.id));
+    if (vd && vd.length) await supabase.from('visitors').delete().in('id', vd.map(r => r.id));
+    res.json({ success: true, deletedOrders: (od || []).length, deletedVisitors: (vd || []).length });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// Delete inactive orders (confirmed/rejected)
+app.delete('/api/admin/inactive', async (req, res) => {
+  try {
+    if (!isAdmin(req)) return res.status(401).json({ success: false });
+    const { data } = await supabase.from('orders').select('id').in('status', ['confirmed', 'rejected']);
+    if (data && data.length) await supabase.from('orders').delete().in('id', data.map(r => r.id));
+    res.json({ ok: true, deleted: (data || []).length });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('*', (req, res) => {
